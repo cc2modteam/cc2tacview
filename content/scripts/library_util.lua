@@ -916,6 +916,8 @@ end
 
 
 g_last_tacview_tick = 0
+g_tacview_fps_goal = 3
+
 g_tacview_thread = tostring( {} ):sub(8) -- extracts the "address" part
 
 function is_local()
@@ -939,23 +941,25 @@ end
 
 function do_tacview(local_screen_only)
     local now = update_get_logic_tick() / 30
-    local seconds = math.floor(now)
+
     if g_last_tacview_tick == 0 then
         print("start tacview adapter .." .. g_tacview_thread )
     end
 
-    if g_last_tacview_tick == seconds then
+    local next_tacview_frame = g_last_tacview_tick + (g_tacview_fps_goal/30)
+
+    if now < next_tacview_frame then
         return
     end
-    g_last_tacview_tick = seconds
 
+    g_last_tacview_tick = now
     if local_screen_only then
         if is_local() == false then
             return
         end
     end
 
-    print(string.format("tac:t=%d", seconds))
+    print(string.format("tac:t=%f", now))
 
     function try_get_team(v)
         local st, val = pcall(function()
@@ -995,6 +999,10 @@ function do_tacview(local_screen_only)
                 print(string.format("tac:%s:%s%s:docked=%s", g_tacview_thread, k, vid, docked))
             end)
         end
+        pcall(function()
+            local fwd = v:get_forward()
+            print(string.format("tac:%s:%s%s:hdg=%f", g_tacview_thread, k, vid, fwd))
+        end)
     end
 
     function _get_position_xz(v, k, vid)

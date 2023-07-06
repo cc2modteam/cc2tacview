@@ -1,11 +1,11 @@
-import dataclasses
 import subprocess
 import argparse
-from datetime import  datetime
-from io import TextIOBase
+from datetime import datetime
 
 from pathlib import Path
-from typing import Dict, Optional, Any
+from typing import Dict
+
+from cc2types import Unit
 
 CC2 = Path("C:\\Program Files (x86)\\Steam\\steamapps\\common\\Carrier Command 2\\carrier_command.exe")
 parser = argparse.ArgumentParser(description="cc2 tacview adapter")
@@ -15,11 +15,8 @@ parser.add_argument("--load", type=Path,
                     metavar="SAVE")
 
 
-def m2deg(m: float) -> float:
-    """meters to degrees north"""
-    nm = m / 1852.0
-    deg = nm / 60.0
-    return deg
+MAP_ORIGIN_LAT = -5
+MAP_ORIGIN_LON = -5
 
 
 def run_cc2(save_file: Path):
@@ -36,90 +33,6 @@ def run_cc2(save_file: Path):
                 outfile.write(line)
 
 
-@dataclasses.dataclass
-class Unit:
-    uid: str = "x"
-    typ: str = "-1"
-    x: Optional[float] = None
-    y: Optional[float] = None
-    alt: Optional[float] = None
-    team: int = -1
-    last_printed: int = -1
-    docked: bool = True
-    ttl: int = 2
-
-    def update(self, data: dict):
-        for prop in ["x", "y", "alt"]:
-            value = data.get(prop, None)
-            if value is not None:
-                setattr(self, prop, float(value))
-        team = data.get("team", None)
-        if team is not None:
-            self.team = int(team)
-        if "docked" in data:
-            self.docked = data.get("docked") == "true"
-
-    @property
-    def definition_index(self) -> int:
-        return int(self.typ)
-
-    def get_properties(self) -> Dict[str, Any]:
-        tags = []
-        props = {}
-        vdef = self.definition_index
-        if vdef >= 0:
-            if vdef == 0:
-                props["ShortName"] = "CRR"
-                tags.extend(["Heavy", "Sea", "Watercraft", "AircraftCarrier"])
-            elif vdef == 8:
-                props["ShortName"] = "ALB"
-                tags.extend(["Light", "Air", "FixedWing"])
-            elif vdef == 10:
-                props["ShortName"] = "MNT"
-                tags.extend(["Medium", "Air", "FixedWing"])
-            elif vdef == 12:
-                props["ShortName"] = "RZR"
-                tags.extend(["Light", "Air", "Rotorcraft"])
-            elif vdef == 14:
-                props["ShortName"] = "PTR"
-                tags.extend(["Medium", "Air", "Rotorcraft"])
-
-        if tags:
-            props["Type"] = "+".join(tags)
-        return props
-
-    def to_acmi(self):
-        items = []
-        if self.uid[0] == "u":
-            item_id = self.uid[1:]
-            items.append(item_id)
-        props = self.get_properties()
-        if props:
-            for name, value in props.items():
-                items.append(f"{name}={value}")
-        if self.x is not None:
-            position = f"T={m2deg(self.x)}|{m2deg(self.y)}|"
-            if self.alt is not None:
-                position += f"{self.alt}"
-            position += "||"
-            items.append(position)
-        if self.team >= 0:
-            color = "Orange"
-            if self.team == 0:
-                color = "Cyan"
-            elif self.team == 1:
-                color = "Red"
-            elif self.team == 2:
-                color = "Yellow"
-            elif self.team == 3:
-                color = "Green"
-            elif self.team == 4:
-                color = "Violet"
-            items.append(f"Color={color}")
-        detail = ",".join(items)
-        return detail
-
-
 def totacview(load_file: Path) -> Path:
     game_time = 0
     units: Dict[str, Unit] = {}
@@ -129,6 +42,8 @@ def totacview(load_file: Path) -> Path:
         with load_file.open("r") as infile:
             print("FileType=text/acmi/tacview", file=outfile)
             print("FileVersion=2.2", file=outfile)
+            print(f"0,ReferenceLongitude={MAP_ORIGIN_LON}", file=outfile)
+            print(f"0,ReferenceLatitude={MAP_ORIGIN_LAT}P", file=outfile)
 
             for line in infile.readlines():
                 if line.startswith("tac:"):
@@ -146,24 +61,34 @@ def totacview(load_file: Path) -> Path:
                         if len(parts) == 2:
                             if "t" in props:
                                 # time sync
-                                new_game_time = int(props["t"])
+                                new_game_time = float(props["t"])
                                 if game_time == 0:
                                     print("0,ReferenceTime=2000-01-01T00:00:00Z", file=outfile)
                                 if new_game_time > game_time:
                                     game_time = new_game_time
                                     # print all units so far
-                                    for u in units.values():
+                                    for uid, u in units.items():
                                         if u.last_printed < game_time:
                                             if u.ttl > 0:
                                                 u.last_printed = game_time
-                                                if not u.docked:
+                                                if u.is_unit() and not u.docked:
                                                     if u.x is not None:
                                                         print(u.to_acmi(), file=outfile)
+                                                        events = u.get_events()
+                                                        u.clear_events()
+                                                        for event in events:
+                                                            print(f"0,Event={event}|{u.map_id()}|", file=outfile)
                                                         u.x = None
                                                         u.y = None
-                                                        u.alt = None
 
-                                    print(f"#{new_game_time}.0", file=outfile)
+                                    for uid in list(units.keys()):
+                                        u = units[uid]
+                                        if u.ttl < 0:
+                                            # unit expired/destroyed?
+                                            print(f"0,Event=Destroyed|{uid}|")
+                                            del units[uid]
+
+                                    print(f"#{new_game_time}", file=outfile)
 
                         elif len(parts) > 3:
                             item_id = parts[2]
