@@ -917,19 +917,35 @@ end
 
 g_last_tacview_tick = 0
 g_tacview_fps_goal = 3
-
 g_tacview_thread = tostring( {} ):sub(8) -- extracts the "address" part
+g_tacview_debug = 1
+g_tacview_errors = {}
+g_tacview_skip = false
 
-function is_local()
-    local status, result = pcall(function()
-        return update_get_is_focus_local()
-    end)
-    if status then
-        return result
+function tacview_table_contains(tab, needle)
+    for _, v in pairs(tab) do
+        if v == needle then
+            return true
+        end
     end
-    -- must be the hud
-    return true
 end
+
+function tacview_debug_pcall(callable)
+    local success, err = pcall(callable)
+    if g_tacview_debug == 1 then
+        if not success then
+            pcall(function()
+                local errmsg = string.format("error: %s", err)
+                if not tacview_table_contains(g_tacview_errors, errmsg) then
+                    print(errmsg)
+                end
+                g_tacview_errors[#g_tacview_errors+1] = errmsg
+            end)
+        end
+    end
+    return success, err
+end
+
 
 function format_time(time)
     local seconds = math.floor(time) % 60
@@ -939,7 +955,17 @@ function format_time(time)
     return string.format("%02.f:%02.f:%02.f", hours, minutes, seconds)
 end
 
-function do_tacview(local_screen_only)
+function tacview_out(msg)
+    tacview_debug_pcall(function()
+        print(string.format("tac:%s", msg))
+    end)
+end
+
+function do_tacview(is_hud)
+    if g_tacview_skip then
+        return
+    end
+
     local now = update_get_logic_tick() / 30
 
     if g_last_tacview_tick == 0 then
@@ -951,25 +977,36 @@ function do_tacview(local_screen_only)
     if now < next_tacview_frame then
         return
     end
-
-    g_last_tacview_tick = now
-    if local_screen_only then
-        if is_local() == false then
-            return
+    if g_last_tacview_tick == 0 then
+        if not is_hud then
+            -- return if we aren't the lifeboat
+            local screen_vehicle = update_get_screen_vehicle()
+            if screen_vehicle:get() then
+                if screen_vehicle:get_definition_index() ~= e_game_object_type.chassis_sea_lifeboat then
+                    g_tacview_skip = true
+                else
+                    print(string.format("tacview %s adapter on lifeboat screen", g_tacview_thread))
+                end
+            end
+        else
+            print(string.format("tacview %s adapter on hud", g_tacview_thread))
         end
     end
 
-    print(string.format("tac:t=%f", now))
+    g_last_tacview_tick = now
+    tacview_out(string.format("t=%f", now))
 
     function try_get_team(v)
-        local st, val = pcall(function()
+        local st = false
+        local val = 0
+        st, val = tacview_debug_pcall(function()
             local v_team = v:get_team_id()
             return v_team
         end)
         if st then
             return val
         end
-        local st2, val2 = pcall(function()
+        local st2, val2 = tacview_debug_pcall(function()
             local v_team = v:get_team()
             return v_team
         end)
@@ -981,55 +1018,67 @@ function do_tacview(local_screen_only)
     end
 
     function try_get_details(v, k, vid)
-        local st, err = pcall(function()
+        local st, err = tacview_debug_pcall(function()
             local v_def = v:get_definition_index()
             local v_team = try_get_team(v)
-            print(string.format("tac:%s:%s%s:def=%d,team=%d", g_tacview_thread, k, vid, v_def, v_team))
+            tacview_out(string.format("%s%s:def=%d,team=%d", k, vid, v_def, v_team))
+        end)
+        st, err = tacview_debug_pcall(function()
+            tacview_out(string.format("%s%s:docked=%s", k, vid, v:get_is_docked()))
         end)
         if not st then
-            print(err)
-        end
-        local derr, val = pcall(function()
-            print(string.format("tac:%s:%s%s:docked=%s", g_tacview_thread, k, vid, v:get_is_docked()))
-        end)
-        if not derr then
-            pcall(function()
+            tacview_debug_pcall(function()
                 local parent = v:get_attached_parent_id()
                 local docked = parent > 0
-                print(string.format("tac:%s:%s%s:docked=%s", g_tacview_thread, k, vid, docked))
+                tacview_out(string.format("%s%s:docked=%s", k, vid, docked))
             end)
         end
-        pcall(function()
+        st, err = tacview_debug_pcall(function()
             local fwd = v:get_forward()
-            print(string.format("tac:%s:%s%s:hdg=%f", g_tacview_thread, k, vid, fwd))
+            local bearing = ((90 - math.atan(fwd:y(), fwd:x()) / math.pi * 180) + 360) % 360
+            tacview_out(string.format("%s%s:hdg=%f", k, vid, bearing))
         end)
+        if not st then
+            tacview_debug_pcall(function()
+                local fwd = v:get_direction()
+                local bearing = ((90 - math.atan(fwd:y(), fwd:x()) / math.pi * 180) + 360) % 360
+                tacview_out(string.format("%s%s:hdg=%f", k, vid, bearing))
+            end)
+        end
     end
 
     function _get_position_xz(v, k, vid)
-        local success, err = pcall(function()
+        local success, err = tacview_debug_pcall(function()
             local v_xz = v:get_position_xz()
-            print(string.format("tac:%s:%s%s:x=%f,y=%f", g_tacview_thread, k, vid, v_xz:x(), v_xz:y()))
+            tacview_out(string.format("%s%s:x=%f,y=%f", k, vid, v_xz:x(), v_xz:y()))
         end)
         return success
     end
 
     function _get_position(v, k, vid)
-        local success, err = pcall(function()
+        local success, err = tacview_debug_pcall(function()
             local v_pos = v:get_position()
-            print(string.format("tac:%s:%s%s:x=%f,y=%f,alt=%f", g_tacview_thread, k, vid,
-                    v_pos:x(), v_pos:z(), v_pos:y()))
+            tacview_out(string.format("%s%s:x=%f,y=%f,alt=%f", k, vid, v_pos:x(), v_pos:z(), v_pos:y()))
         end)
         return success
+    end
+
+    function try_get_alt(v, k, vid)
+        tacview_debug_pcall(function()
+            local v_alt = v:get_altitude()
+            tacview_out(string.format("%s%s:alt=%f", k, vid, v_alt))
+        end)
     end
 
     function try_get_position(v, k, vid)
         if not _get_position(v, k, vid) then
             _get_position_xz(v, k, vid)
+            try_get_alt(v, k, vid)
         end
     end
 
     function try_get_visible(v)
-        local st, ret = pcall(function()
+        local st, ret = tacview_debug_pcall(function()
             return v:get_is_visible()
         end)
         if st then
@@ -1038,14 +1087,14 @@ function do_tacview(local_screen_only)
         return false
     end
 
-    local ret, err = pcall(function()
+    local ret, err = tacview_debug_pcall(function()
         local vehicle_count = update_get_map_vehicle_count()
 
         for i = 0, vehicle_count - 1, 1 do
             local vehicle = update_get_map_vehicle_by_index(i)
             if vehicle:get() then
                 local visible = true
-                local st, ret = pcall(function()
+                local st, ret = tacview_debug_pcall(function()
                     local v_team = vehicle:get_team_id()
                     local _visible = update_get_screen_team_id() == v_team
                     return _visible
@@ -1082,6 +1131,6 @@ function do_tacview(local_screen_only)
     end)
 
     if ret == false then
-        print(err)
+        print(string.format("err:%s", err))
     end
 end
