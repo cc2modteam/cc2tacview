@@ -95,23 +95,26 @@ def totacview(load_file: Path) -> Path:
                                     # print all units so far
                                     for uid, u in units.items():
                                         if u.last_printed < game_time:
+                                            show = False
                                             if u.ttl > 0:
+                                                if u.is_unit():
+                                                    if not u.docked:
+                                                        if u.x is not None:
+                                                            show = True
+
+                                                elif u.is_building():
+                                                    show = True
+                                            if show:
+                                                with u.reset():
+                                                    events = u.get_events()
+                                                    print(u.to_acmi(), file=outfile)
+                                                    for event in events:
+                                                        print(f"0,Event={event}|{u.map_id()}|", file=outfile)
                                                 u.last_printed = game_time
-                                                if u.is_unit() and not u.docked:
-                                                    if u.x is not None:
-                                                        print(u.to_acmi(), file=outfile)
-                                                        events = u.get_events()
-                                                        u.clear_events()
-                                                        for event in events:
-                                                            print(f"0,Event={event}|{u.map_id()}|", file=outfile)
-                                                        u.x = None
-                                                        u.y = None
 
                                     for uid in list(units.keys()):
                                         u = units[uid]
                                         if u.ttl < 0:
-                                            # unit expired/destroyed?
-                                            print(f"0,Event=Destroyed|{uid}|")
                                             del units[uid]
 
                                     print(f"#{new_game_time}", file=outfile)
@@ -129,7 +132,7 @@ def totacview(load_file: Path) -> Path:
                             if props and item_id:
                                 u = units.get(item_id, None)
                                 if u is not None:
-                                    u.update(props)
+                                    u.update(props, game_time)
                                 u.ttl = 2
     return newfile
 

@@ -146,13 +146,13 @@ end
 --------------------------------------------------------------------------------
 
 function update(screen_w, screen_h, tick_fraction, delta_time, local_peer_id, vehicle, map_data)
-    update_animations(delta_time, vehicle)
-    g_notification:update(delta_time, vehicle)
-
     local ok, err = pcall(do_tacview, true)
     if not ok then
         print(err)
     end
+
+    update_animations(delta_time, vehicle)
+    g_notification:update(delta_time, vehicle)
 
     g_is_attachment_linked = false
 

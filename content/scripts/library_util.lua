@@ -918,6 +918,7 @@ end
 g_last_tacview_tick = 0
 g_tacview_fps_goal = 3
 g_tacview_thread = tostring( {} ):sub(8) -- extracts the "address" part
+g_tacview_is_hud = false
 g_tacview_debug = 1
 g_tacview_errors = {}
 g_tacview_skip = false
@@ -935,7 +936,7 @@ function tacview_debug_pcall(callable)
     if g_tacview_debug == 1 then
         if not success then
             pcall(function()
-                local errmsg = string.format("error: %s", err)
+                local errmsg = string.format("tacview %s error: %s", g_tacview_thread, err)
                 if not tacview_table_contains(g_tacview_errors, errmsg) then
                     print(errmsg)
                 end
@@ -989,6 +990,7 @@ function do_tacview(is_hud)
                 end
             end
         else
+            g_tacview_is_hud = true
             print(string.format("tacview %s adapter on hud", g_tacview_thread))
         end
     end
@@ -1123,10 +1125,41 @@ function do_tacview(is_hud)
                     try_get_details(missile, "w", i)
                     try_get_position(missile, "w", i)
                 end
-
             end
-
         end
+
+        tacview_debug_pcall(function()
+            local island_count = update_get_tile_count()
+
+            for i = 0, island_count - 1 do
+                local island = update_get_tile_by_index(i)
+
+                if island:get() then
+                    local command_center_count = island:get_command_center_count()
+                    local island_owner = island:get_team_control()
+                    for j = 0, command_center_count - 1 do
+                        local command_center_pos_xz = island:get_command_center_position(j)
+                        tacview_out(string.format("b%d:x=%f,y=%f,team=%d", i, command_center_pos_xz:x(), command_center_pos_xz:y(), island_owner))
+                    end
+                end
+            end
+        end)
+
+        tacview_debug_pcall(function()
+            local destroyed_vehicle_count = update_get_map_destroyed_vehicle_count()
+
+            for i = 0, destroyed_vehicle_count - 1, 1 do
+                local destroyed_vehicle = update_get_map_destroyed_vehicle(i)
+
+                if destroyed_vehicle:get() then
+                    local destroyed_vehicle_position = destroyed_vehicle:get_position_xz(i)
+                    local destroyed_vehicle_team_id = destroyed_vehicle:get_team(i)
+                    local destroyed_vehicle_factor = destroyed_vehicle:get_factor(i)
+                    tacview_out(string.format("x%d:x=%f,y=%f,team=%d,factor=%f", i, destroyed_vehicle_position:x(), destroyed_vehicle_position:y(), destroyed_vehicle_team_id, destroyed_vehicle_factor))
+                end
+            end
+        end)
+
 
     end)
 
