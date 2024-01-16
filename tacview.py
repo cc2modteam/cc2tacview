@@ -23,7 +23,9 @@ MAP_ORIGIN_LON = -5
 def get_last_file() -> Path:
     folder = Path.home() / "cc2-log"
     files = sorted(folder.glob("cc2-rac-raw-*.log"), key=lambda x: x.name)
-    return files[-1]
+    if len(files):
+        return files[-1]
+    assert False, "no files to convert"
 
 
 def run_cc2(save_file: Path):
@@ -58,6 +60,7 @@ def run_cc2(save_file: Path):
 def totacview(load_file: Path) -> Path:
     game_time = 0
     units: Dict[str, Unit] = {}
+    expls: Dict[str, Unit] = {}
     print(f"loading {load_file}..")
     lines = 0
     newfile = load_file.parent / (load_file.stem + ".acmi")
@@ -104,10 +107,13 @@ def totacview(load_file: Path) -> Path:
 
                                                 elif u.is_building():
                                                     show = True
+                                                elif u.is_explosion():
+                                                    show = True
                                             if show:
                                                 with u.reset():
                                                     events = u.get_events()
-                                                    print(u.to_acmi(), file=outfile)
+                                                    if u.has_changed():
+                                                        print(u.to_acmi(remember=True), file=outfile)
                                                     for event in events:
                                                         print(f"0,Event={event}|{u.map_id()}|", file=outfile)
                                                 u.last_printed = game_time
@@ -115,6 +121,8 @@ def totacview(load_file: Path) -> Path:
                                     for uid in list(units.keys()):
                                         u = units[uid]
                                         if u.ttl < 0:
+                                            for event in u.get_events():
+                                                print(f"0,Event={event}|{u.map_id()}|", file=outfile)
                                             del units[uid]
 
                                     print(f"#{new_game_time}", file=outfile)
@@ -132,8 +140,11 @@ def totacview(load_file: Path) -> Path:
                             if props and item_id:
                                 u = units.get(item_id, None)
                                 if u is not None:
-                                    u.update(props, game_time)
-                                u.ttl = 2
+                                    try:
+                                        u.update(props, game_time)
+                                        u.ttl = 2
+                                    except:
+                                        pass
     return newfile
 
 

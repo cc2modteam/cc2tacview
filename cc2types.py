@@ -96,7 +96,7 @@ class Unit:
     event_takeoff: Optional[float] = None
     event_landed: Optional[float] = None
     ttl: int = 2
-
+    last_output: Optional[str] = None
     altitude_history: List[Record] = dataclasses.field(default_factory=list)
 
     def map_kind(self) -> str:
@@ -158,6 +158,10 @@ class Unit:
         except TypeError:
             return -1
 
+    def has_changed(self) -> bool:
+        current = self.to_acmi()
+        return current != self.last_output
+
     def get_events(self) -> List[str]:
         events = []
         if self.is_air():
@@ -188,6 +192,9 @@ class Unit:
 
         if self.is_building():
             tags = ["Building"]
+        if self.is_explosion():
+            tags = ["Explosion"]
+            props["Radius"] = "5"
 
         if tags:
             props["Type"] = "+".join(tags)
@@ -225,12 +232,9 @@ class Unit:
             self.clear_events()
             self.hdg = None
 
-    def to_acmi(self):
+    def to_acmi(self, remember=False):
         items = [str(self.map_id())]
         props = self.get_properties()
-        if self.is_building():
-            if self.type_name == "JETTY":
-                props["Radius"] = "100"
 
         if props:
             if self.last_printed < 0:
@@ -263,4 +267,6 @@ class Unit:
                 color = "Violet"
             items.append(f"Color={color}")
         detail = ",".join(items)
+        if remember:
+            self.last_output = detail
         return detail

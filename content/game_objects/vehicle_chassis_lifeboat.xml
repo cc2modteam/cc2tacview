@@ -1,4 +1,4 @@
-<?xml version="1.0" encoding="UTF-8"?>
+ <?xml version="1.0" encoding="UTF-8"?>
 <data display_name_loc="0" bounding_radius="3.00000000e+00" lod_scale="1.00000000e+00" ai_type="1">
 	<bodies>
 		<body mass="1.00000000e+03" name="body" is_static="false">
@@ -99,7 +99,7 @@
 	<wheels/>
 	<attachments/>
 	<force_emitters>
-		<force_emitter name="water" magnitude="3.20000000e+01">
+		<force_emitter name="water" magnitude="3.20000000e+01">``
 			<transform m00="9.99999940e-01" m01="0.00000000e+00" m02="-0.00000000e+00" m10="0.00000000e+00" m11="-4.37113883e-08" m12="-1.00000000e+00" m20="0.00000000e+00" m21="1.00000000e+00" m22="-4.37113883e-08" tx="0.00000000e+00" ty="0.00000000e+00" tz="-2.00000000e+00"/>
 		</force_emitter>
 		<force_emitter name="water_side" magnitude="4.00000000e+00">
@@ -179,7 +179,14 @@
 		</dial>
 	</dials>
 	<screens>
-		<screen name="screen_map" display_name_loc="516" script_file_name="scripts/screen_vehicle_control.lua" body_index="0" seat_index="4294967295" controls="Q: Exit" type="3">
+		<screen name="screen_map"
+				display_name_loc="516"
+				script_file_name="scripts/screen_carrier_camera.lua"
+				body_index="0"
+				seat_index="4294967295"
+				controls="Q: Exit"
+				refresh_interval="2"
+				type="3">
 			<transform m00="1.00000000e+00" m01="0.00000000e+00" m02="0.00000000e+00" m10="0.00000000e+00" m11="7.07106769e-01" m12="-7.07106769e-01" m20="0.00000000e+00" m21="7.07106769e-01" m22="7.07106769e-01" tx="3.79076362e-01" ty="1.47981906e+00" tz="1.57684195e+00"/>
 		</screen>
 	</screens>
