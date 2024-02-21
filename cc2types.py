@@ -96,14 +96,18 @@ class Unit:
     event_takeoff: Optional[float] = None
     event_landed: Optional[float] = None
     ttl: int = 2
+    destroyed: bool = False
     last_output: Optional[str] = None
     altitude_history: List[Record] = dataclasses.field(default_factory=list)
 
+    # building/island size
+    ew = 0
+    ns = 0
+    h = 0
+    name = ""
+
     def map_kind(self) -> str:
         return self.uid[0]
-
-    def is_explosion(self) -> bool:
-        return self.map_kind() == "x"
 
     def is_building(self) -> bool:
         if self.type_name == "JETTY":
@@ -116,7 +120,7 @@ class Unit:
     def map_id(self) -> int:
         value = int(self.uid[1:])
         kind = self.map_kind()
-        if self.is_building():
+        if self.is_building() and self.type_name != "JETTY":
             return (1 + value) << 16
         elif kind == "x":
             # explosion
@@ -127,13 +131,19 @@ class Unit:
         return 1 + value
 
     def update(self, data: dict, t: float):
-        for prop in ["x", "y", "alt", "hdg"]:
+        for prop in ["x", "y", "alt", "hdg", "ns", "ew", "h"]:
             value = data.get(prop, None)
             if value is not None:
                 setattr(self, prop, float(value))
+        name = data.get("name", None)
+        if name is not None:
+            self.name = name
         team = data.get("team", None)
         if team is not None:
             self.team = int(team)
+        if "destroyed" in data:
+            self.destroyed = True
+
         if "docked" in data:
             docked_now = self.docked
             self.docked = data.get("docked") == "true"
@@ -169,8 +179,10 @@ class Unit:
                 events.append("Landed")
             elif self.event_takeoff is not None:
                 events.append("TakenOff")
-        if self.ttl < 1:
+        if self.destroyed:
             events.append("Destroyed")
+        elif self.ttl < 1:
+            events.append("LeftArea")
         return events
 
     def clear_events(self):
@@ -192,6 +204,21 @@ class Unit:
 
         if self.is_building():
             tags = ["Building"]
+
+            if not self.h:
+                if self.type_name == "JETTY":
+                    props["Width"] = "200"
+                    props["Length"] = "200"
+                    props["Height"] = "42"
+                else:
+                    props["Width"] = "200"
+                    props["Length"] = "200"
+                    props["Height"] = "50"
+            else:
+                props["Width"] = str(self.ew)
+                props["Length"] = str(self.ns)
+                props["Height"] = str(self.h)
+
         if self.is_explosion():
             tags = ["Explosion"]
             props["Radius"] = "5"
@@ -199,6 +226,9 @@ class Unit:
         if tags:
             props["Type"] = "+".join(tags)
         return props
+
+    def is_explosion(self):
+        return False
 
     @property
     def type_name(self) -> str:

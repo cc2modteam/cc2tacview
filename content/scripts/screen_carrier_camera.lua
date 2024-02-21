@@ -2,6 +2,7 @@ g_is_exit = false
 g_state_counter = 0
 g_vehicle_id = 0
 
+
 function update(screen_w, screen_h, ticks)
 
     do_tacview()
@@ -64,6 +65,10 @@ function tacview_table_contains(tab, needle)
     end
 end
 
+function tacview_log_info(msg)
+    print(string.format("log:%s", msg))
+end
+
 function tacview_debug_pcall(callable)
     local success, err = pcall(callable)
     if g_tacview_debug == 1 then
@@ -122,10 +127,52 @@ function do_tacview()
     end
 end
 
+function _be_tacview()
+    -- if we are attached to the last carroer on our team, run, else skip
+    local self = update_get_screen_vehicle()
+    if self:get() then
+        local vteam = update_get_screen_team_id()
+        local vdef = self:get_definition_index()
+        if vdef ~= e_game_object_type.chassis_carrier then
+            g_tacview_skip = true
+        else
+            -- we are a lifeboat, skip if we are not the last lifeboat
+            local vehicle_count = update_get_map_vehicle_count()
+            local last_crr = nil
+
+            for i = 0, vehicle_count - 1, 1 do
+                local vehicle = update_get_map_vehicle_by_index(i)
+                if vehicle:get() then
+                    local vdef = vehicle:get_definition_index()
+                    if vdef == e_game_object_type.chassis_carrier then
+                        if vteam == vehicle:get_team() then
+                            -- crr on our team
+                            last_crr = vehicle
+                        end
+                    end
+                end
+            end
+
+            if last_crr ~= nil then
+                if last_crr:get_id() ~= self:get_id() then
+                    -- we are not the last crr, dont do tacview
+                    g_tacview_skip = true
+                end
+            end
+        end
+    end
+end
+
+
+g_vehicles = {}
+
 function _do_tacview()
+    _be_tacview()
+
     if g_tacview_skip then
         return
     end
+
 
     if g_tacview_drydock == nil then
         get_drydock()
@@ -143,10 +190,10 @@ function _do_tacview()
         return
     end
     if g_last_tacview_tick == 0 then
-        -- return if we aren't the lifeboat
+        -- return if we aren't the carrier
         local screen_vehicle = update_get_screen_vehicle()
         if screen_vehicle:get() then
-            if screen_vehicle:get_definition_index() ~= e_game_object_type.chassis_sea_lifeboat then
+            if screen_vehicle:get_definition_index() ~= e_game_object_type.chassis_carrier then
                 g_tacview_skip = true
                 return
             else
@@ -155,20 +202,27 @@ function _do_tacview()
         end
     end
 
+
     g_last_tacview_tick = now
     tacview_out(string.format("t=%f", now))
 
     function try_get_details(v, k, vid)
         local v_def = v:get_definition_index()
         local v_team = v:get_team()
-        tacview_out(string.format("%s%s:def=%d,team=%d", k, vid, v_def, v_team))
+        if g_vehicles[vid] == nil then
+            tacview_out(string.format("%s%s:def=%d,team=%d", k, vid, v_def, v_team))
+        end
         local parent = v:get_attached_parent_id()
         local docked = parent > 0
         tacview_out(string.format("%s%s:docked=%s", k, vid, docked))
 
-        local fwd = v:get_direction()
-        local bearing = ((90 - math.atan(fwd:y(), fwd:x()) / math.pi * 180) + 360) % 360
-        tacview_out(string.format("%s%s:hdg=%f", k, vid, bearing))
+        if not docked then
+            local fwd = v:get_direction()
+            local bearing = ((90 - math.atan(fwd:y(), fwd:x()) / math.pi * 180) + 360) % 360
+            tacview_out(string.format("%s%s:hdg=%f", k, vid, bearing))
+        end
+
+        try_get_position(v, k, vid)
     end
 
     function try_get_position(v, k, vid)
@@ -188,11 +242,16 @@ function _do_tacview()
     end
 
     local ret, err = tacview_debug_pcall(function()
+        -- fyi. note every non-docked vehicle id, if one goes missing, it was destroyed
+        local seen = {}
         local vehicle_count = update_get_map_vehicle_count()
 
         for i = 0, vehicle_count - 1, 1 do
             local vehicle = update_get_map_vehicle_by_index(i)
             if vehicle:get() then
+                local vid = vehicle:get_id()
+                seen[vid] = true
+
                 local v_team = vehicle:get_team()
                 local visible = update_get_screen_team_id() == v_team
 
@@ -201,7 +260,6 @@ function _do_tacview()
                 end
                 if visible then
                     try_get_details(vehicle, "u", vehicle:get_id())
-                    try_get_position(vehicle, "u", vehicle:get_id())
                 end
             end
         end
@@ -217,28 +275,30 @@ function _do_tacview()
                     local island_owner = island:get_team_control()
                     for j = 0, command_center_count - 1 do
                         local command_center_pos_xz = island:get_command_center_position(j)
-                        tacview_out(string.format("b%d:x=%f,y=%f,team=%d", i, command_center_pos_xz:x(), command_center_pos_xz:y(), island_owner))
+                        local island_size = 2400
+                        if island:get_turret_spawn_count() > 3 then
+                            island_size = 3000
+                            if island:get_turret_spawn_count() > 8 then
+                                island_size = 3400
+                            end
+                        end
+
+                        tacview_out(string.format("b%d:x=%f,y=%f,team=%d,ew=%d,ns=%d,h=10,name=%s", i + 1,
+                                command_center_pos_xz:x(), command_center_pos_xz:y(), island_owner,
+                                island_size, island_size,
+                                island:get_name()
+                        ))
                     end
                 end
             end
         end)
 
-        tacview_debug_pcall(function()
-            local destroyed_vehicle_count = update_get_map_destroyed_vehicle_count()
-
-            for i = 0, destroyed_vehicle_count - 1, 1 do
-                local destroyed_vehicle = update_get_map_destroyed_vehicle(i)
-
-                if destroyed_vehicle:get() then
-                    local destroyed_vehicle_position = destroyed_vehicle:get_position_xz(i)
-                    local destroyed_vehicle_team_id = destroyed_vehicle:get_team(i)
-                    local destroyed_vehicle_factor = destroyed_vehicle:get_factor(i)
-                    tacview_out(string.format("x%d:x=%f,y=%f,team=%d,factor=%f", i, destroyed_vehicle_position:x(), destroyed_vehicle_position:y(), destroyed_vehicle_team_id, destroyed_vehicle_factor))
-                end
+        for vid, _ in pairs(g_vehicles) do
+            if seen[vid] == nil then
+                tacview_out(string.format("u%d:destroyed=1", vid))
             end
-        end)
-
-
+        end
+        g_vehicles = seen
     end)
 
     if ret == false then

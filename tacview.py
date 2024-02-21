@@ -29,7 +29,7 @@ def get_last_file() -> Path:
 
 
 def run_cc2(save_file: Path):
-    cmdline = [str(CC2)]
+    cmdline = [str(CC2), "-dev"]
     logger.info("Starting cc2 ..")
     proc = subprocess.Popen(cmdline,
                             stderr=subprocess.STDOUT,
@@ -40,17 +40,31 @@ def run_cc2(save_file: Path):
     connected = False
     logger.info(f"Save tac data as: {save_file} ..")
     prev = None
+
+    spins = ["/", "-", "\\"]
+    spin_n = 0
+
+    msg_count = 0
+    def spinner(spin_n):
+        print(f"\r{msg_count} " + spins[spin_n], end=" ")
+        spin_n = (1 + spin_n) % len(spins)
+        return spin_n
+
     with open(save_file, "w") as outfile:
         while proc.poll() is None:
+            spin_n = spinner(spin_n)
             line = proc.stdout.readline()
             if line == prev:
                 continue
             if line.startswith("tac:"):
+                msg_count += 1
                 if not connected:
                     connected = True
                     logger.info("connected with stdout..")
                 outfile.write(line)
                 prev = line
+            elif line.startswith("log:"):
+                logger.info(line.split(":", 1)[1].strip())
             else:
                 if line.rstrip():
                     logger.info(line.rstrip())
@@ -106,8 +120,6 @@ def totacview(load_file: Path) -> Path:
                                                             show = True
 
                                                 elif u.is_building():
-                                                    show = True
-                                                elif u.is_explosion():
                                                     show = True
                                             if show:
                                                 with u.reset():
