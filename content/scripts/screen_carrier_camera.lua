@@ -228,7 +228,8 @@ function _do_tacview()
     function try_get_position(v, k, vid)
         local v_xz = v:get_position_xz()
         local alt = get_altitude(vid)
-        tacview_out(string.format("%s%s:x=%f,y=%f,alt=%f", k, vid, v_xz:x(), v_xz:y(), alt))
+        tacview_out(string.format(
+                "%s%s:x=%f,y=%f,alt=%f", k, vid, v_xz:x(), v_xz:y(), alt))
     end
 
     function try_get_visible(v)
@@ -252,12 +253,12 @@ function _do_tacview()
                 local vid = vehicle:get_id()
                 seen[vid] = true
 
-                local v_team = vehicle:get_team()
-                local visible = update_get_screen_team_id() == v_team
+                --local v_team = vehicle:get_team()
+                local visible = true -- update_get_screen_team_id() == v_team
 
-                if not visible then
-                    visible = vehicle:get_is_visible()
-                end
+                --if not visible then
+                --    visible = vehicle:get_is_visible()
+                --end
                 if visible then
                     try_get_details(vehicle, "u", vehicle:get_id())
                 end

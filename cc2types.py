@@ -283,7 +283,7 @@ class Unit:
                 #     hdg = self.hdg
                 # position += f"|||{hdg}"
             items.append(position)
-        if self.team >= 0:
+        if self.team is not None and self.team >= 0:
             color = "Orange"
             if self.team == 0:
                 color = "Red"
