@@ -128,7 +128,8 @@ class Unit:
         elif kind == "w":
             # explosion
             return (1 + value) << 48
-        return 1 + value
+        idnum = 1 + value
+        return idnum
 
     def update(self, data: dict, t: float):
         for prop in ["x", "y", "alt", "hdg", "ns", "ew", "h"]:
@@ -196,8 +197,15 @@ class Unit:
             vdef = self.definition_index
             if vdef >= 0:
                 mapped = typemap.get(self.definition_index, None)
+                if self.type_name == "CRR":
+                    props["RadarRange"] = 10000
+                if self.type_name == "SWD":
+                    props["RadarRange"] = 8000
+                if self.type_name == "NDL":
+                    props["RadarRange"] = 5000
+
                 if mapped is not None:
-                    props["ShortName"] = self.type_name
+                    props["ShortName"] = self.type_name + self.uid[1:]
                     tags.extend(mapped.tags)
                     if mapped.name_prefix:
                         props["Name"] = mapped.name_prefix
@@ -218,6 +226,8 @@ class Unit:
                 props["Width"] = str(self.ew)
                 props["Length"] = str(self.ns)
                 props["Height"] = str(self.h)
+                if self.name:
+                    props["Name"] = self.name
 
         if self.is_explosion():
             tags = ["Explosion"]
@@ -276,12 +286,6 @@ class Unit:
                 position += ""
             else:
                 position += f"{self.alt}"
-            # heading not working quite right
-            # if self.is_ship():
-                # hdg = ""
-                # if self.hdg is not None:
-                #     hdg = self.hdg
-                # position += f"|||{hdg}"
             items.append(position)
         if self.team is not None and self.team >= 0:
             color = "Orange"

@@ -1,5 +1,6 @@
 import subprocess
 import argparse
+import time
 from datetime import datetime
 from pathlib import Path
 from typing import Dict
@@ -11,6 +12,7 @@ from cc2utils import logger
 CC2 = Path("C:\\Program Files (x86)\\Steam\\steamapps\\common\\Carrier Command 2\\carrier_command.exe")
 parser = argparse.ArgumentParser(description="cc2 tacview adapter")
 parser.add_argument("--run", default=False, action="store_true")
+parser.add_argument("--verbose", default=False, action="store_true")
 parser.add_argument("--load", type=Path,
                     help="convert a cc2 SAVE log to a tacview file",
                     metavar="SAVE")
@@ -28,10 +30,11 @@ def get_last_file() -> Path:
     assert False, "no files to convert"
 
 
-def run_cc2(save_file: Path):
+def run_cc2(save_file: Path, verbose=False):
     cmdline = [str(CC2), "-dev"]
     logger.info("Starting cc2 ..")
     proc = subprocess.Popen(cmdline,
+                            shell=False,
                             stderr=subprocess.STDOUT,
                             stdout=subprocess.PIPE,
                             cwd=CC2.parent,
@@ -45,15 +48,27 @@ def run_cc2(save_file: Path):
     spin_n = 0
 
     msg_count = 0
-    def spinner(spin_n):
-        print(f"\r{msg_count} " + spins[spin_n], end=" ")
+    last_count = 0
+    last_rate = time.monotonic()
+
+    def spinner(prefix, spin_n):
+        print(f"\r{prefix} " + spins[spin_n], end=" ")
         spin_n = (1 + spin_n) % len(spins)
         return spin_n
 
     with open(save_file, "w") as outfile:
         while proc.poll() is None:
-            spin_n = spinner(spin_n)
             line = proc.stdout.readline()
+
+            now = time.monotonic()
+            elapsed = now - last_rate
+            last_rate = now
+            if msg_count > 0 and elapsed > 0:
+                rate = int((msg_count - last_count) / elapsed)
+                prefix = f"{rate} msg/sec"
+                spin_n = spinner(prefix, spin_n)
+            last_count = msg_count
+
             if line == prev:
                 continue
             if line.startswith("tac:"):
@@ -63,6 +78,9 @@ def run_cc2(save_file: Path):
                     logger.info("connected with stdout..")
                 outfile.write(line)
                 prev = line
+                if verbose:
+                    logger.info(line)
+
             elif line.startswith("log:"):
                 logger.info(line.split(":", 1)[1].strip())
             else:
@@ -132,10 +150,11 @@ def totacview(load_file: Path) -> Path:
 
                                     for uid in list(units.keys()):
                                         u = units[uid]
-                                        if u.ttl < 0:
+                                        if u.ttl < 0 or u.destroyed:
                                             for event in u.get_events():
                                                 print(f"0,Event={event}|{u.map_id()}|", file=outfile)
                                             del units[uid]
+                                            print(f"-{u.map_id()}", file=outfile)
 
                                     print(f"#{new_game_time}", file=outfile)
 
@@ -165,7 +184,7 @@ def run():
     if opts.run:
         savefile = Path.home() / "cc2-log" / f"cc2-rac-raw-{datetime.now().timestamp()}.log"
         savefile.parent.mkdir(parents=True, exist_ok=True)
-        run_cc2(savefile)
+        run_cc2(savefile, verbose=opts.verbose)
     elif opts.load:
         filename = opts.load
         if filename.name == "last":

@@ -5,7 +5,7 @@ g_vehicle_id = 0
 
 function update(screen_w, screen_h, ticks)
 
-    do_tacview()
+    do_tacview(ticks)
 
     if update_get_is_focus_local() then
         g_state_counter = g_state_counter + 1
@@ -50,7 +50,6 @@ end
 
 
 g_last_tacview_tick = 0
-g_tacview_fps_goal = 3
 g_tacview_thread = tostring( {} ):sub(8) -- extracts the "address" part
 g_tacview_debug = 1
 g_tacview_errors = {}
@@ -120,8 +119,8 @@ function get_altitude(vid)
     return vect:y()
 end
 
-function do_tacview()
-    local st, err = pcall(_do_tacview)
+function do_tacview(arg)
+    local st, err = pcall(_do_tacview, arg)
     if not st then
         print(err)
     end
@@ -165,30 +164,27 @@ end
 
 
 g_vehicles = {}
+g_islands = {}
 
-function _do_tacview()
+g_tick = 0
+
+function _do_tacview(arg)
     _be_tacview()
 
     if g_tacview_skip then
         return
     end
 
-
     if g_tacview_drydock == nil then
         get_drydock()
     end
-
-    local now = update_get_logic_tick() / 30
+    g_tick = update_get_logic_tick()
+    local now = g_tick / 30  -- seconds since map started
 
     if g_last_tacview_tick == 0 then
         print("start tacview adapter .." .. g_tacview_thread )
     end
 
-    local next_tacview_frame = g_last_tacview_tick + (g_tacview_fps_goal/30)
-
-    if now < next_tacview_frame then
-        return
-    end
     if g_last_tacview_tick == 0 then
         -- return if we aren't the carrier
         local screen_vehicle = update_get_screen_vehicle()
@@ -202,42 +198,93 @@ function _do_tacview()
         end
     end
 
+    local since_last = g_tick - g_last_tacview_tick
 
-    g_last_tacview_tick = now
+    if since_last < 15 then
+        return
+    end
+
+    g_last_tacview_tick = g_tick
     tacview_out(string.format("t=%f", now))
 
     function try_get_details(v, k, vid)
         local v_def = v:get_definition_index()
         local v_team = v:get_team()
-        if g_vehicles[vid] == nil then
-            tacview_out(string.format("%s%s:def=%d,team=%d", k, vid, v_def, v_team))
-        end
+
         local parent = v:get_attached_parent_id()
         local docked = parent > 0
-        tacview_out(string.format("%s%s:docked=%s", k, vid, docked))
+        local found = {
+            team = v_team,
+            def = v_def,
+            docked = docked,
+            hdg = 0,
+            alt = 0,
+            x = 0,
+            y = 0,
+            last_sent = 0,  -- last tick we sent a position
+        }
 
-        if not docked then
-            local fwd = v:get_direction()
-            local bearing = ((90 - math.atan(fwd:y(), fwd:x()) / math.pi * 180) + 360) % 360
-            tacview_out(string.format("%s%s:hdg=%f", k, vid, bearing))
-        end
+        local fwd = v:get_direction()
+        local bearing = ((90 - math.atan(fwd:y(), fwd:x()) / math.pi * 180) + 360) % 360
+        found.hdg = bearing
 
-        try_get_position(v, k, vid)
-    end
-
-    function try_get_position(v, k, vid)
         local v_xz = v:get_position_xz()
         local alt = get_altitude(vid)
-        tacview_out(string.format(
-                "%s%s:x=%f,y=%f,alt=%f", k, vid, v_xz:x(), v_xz:y(), alt))
+
+        found.alt = alt
+        found.x = v_xz:x()
+        found.y = v_xz:y()
+
+        local old = g_vehicles[vid]
+
+        -- emit each new unit once
+        if old == nil or old.def ~= found.def or old.team ~= found.team then
+            -- not printed before
+            tacview_out(string.format(
+                    "%s%s:def=%d,team=%d,docked=%s,x=%f,y=%f,alt=%f,hdg=%f", k, vid,
+                    found.def, found.team, found.docked, found.x, found.y, found.alt, found.hdg))
+            found.last_sent = g_tick
+        else
+            found.last_sent = old.last_sent
+            -- already seen and output, update things that have changed only
+            if found.docked ~= old.docked then
+                tacview_out(string.format("%s%s:docked=%s", k, vid, found.docked))
+            end
+
+            -- if position changed by more than 4m, print location or if its been longer than 10 sec since we did
+            local displaced = math.abs(old.x - found.x) + math.abs(g_vehicles[vid].y - found.y + math.abs(g_vehicles[vid].alt - found.alt))
+            if displaced > 4 or g_tick - old.last_sent > 10 then
+                tacview_out(string.format(
+                "%s%s:x=%f,y=%f,alt=%f,hdg=%f", k, vid,
+                        found.x, found.y, found.alt, found.hdg))
+                found.last_sent = g_tick
+            end
+        end
+        return found
     end
 
     function try_get_visible(v)
-        local st, ret = tacview_debug_pcall(function()
-            return v:get_is_visible()
-        end)
-        if st then
-            return ret
+        local our_team = update_get_screen_team_id()
+        if v:get_team() == our_team then
+            -- see all our stuff
+            return true
+        end
+
+        -- see if within 12km of any of our units
+        local v_xz = v:get_position_xz()
+
+        local vehicle_count = update_get_map_vehicle_count()
+        for i = 0, vehicle_count - 1, 1 do
+            local vehicle = update_get_map_vehicle_by_index(i)
+            if vehicle:get() then
+                if vehicle:get_team() == our_team then
+                    local other_xz = vehicle:get_position_xz()
+                    local dist = vec2_dist(other_xz, v_xz)
+                    if dist < 12000 then
+                        return true
+                    end
+                end
+            end
         end
         return false
     end
@@ -246,57 +293,53 @@ function _do_tacview()
         -- fyi. note every non-docked vehicle id, if one goes missing, it was destroyed
         local seen = {}
         local vehicle_count = update_get_map_vehicle_count()
-
         for i = 0, vehicle_count - 1, 1 do
             local vehicle = update_get_map_vehicle_by_index(i)
             if vehicle:get() then
                 local vid = vehicle:get_id()
-                seen[vid] = true
+                local visible = try_get_visible(vehicle)
 
-                --local v_team = vehicle:get_team()
-                local visible = true -- update_get_screen_team_id() == v_team
-
-                --if not visible then
-                --    visible = vehicle:get_is_visible()
-                --end
                 if visible then
-                    try_get_details(vehicle, "u", vehicle:get_id())
+                    local found = try_get_details(vehicle, "u", vehicle:get_id())
+                    if found ~= nil then
+                        seen[vid] = found
+                    end
                 end
             end
         end
 
-        tacview_debug_pcall(function()
-            local island_count = update_get_tile_count()
+        local island_count = update_get_tile_count()
+        for i = 0, island_count - 1 do
+            local island = update_get_tile_by_index(i)
+            if island:get() then
+                local island_owner = island:get_team_control()
 
-            for i = 0, island_count - 1 do
-                local island = update_get_tile_by_index(i)
-
-                if island:get() then
-                    local command_center_count = island:get_command_center_count()
-                    local island_owner = island:get_team_control()
-                    for j = 0, command_center_count - 1 do
-                        local command_center_pos_xz = island:get_command_center_position(j)
-                        local island_size = 2400
-                        if island:get_turret_spawn_count() > 3 then
-                            island_size = 3000
-                            if island:get_turret_spawn_count() > 8 then
-                                island_size = 3400
-                            end
+                -- only print islands once or when they are captured
+                if g_islands[i] == nil or g_islands[i]:get_team_control() ~= island_owner then
+                    local island_pos = island:get_position_xz()
+                    local island_size = 2400
+                    if island:get_turret_spawn_count() > 3 then
+                        island_size = 3000
+                        if island:get_turret_spawn_count() > 8 then
+                            island_size = 3400
                         end
-
-                        tacview_out(string.format("b%d:x=%f,y=%f,team=%d,ew=%d,ns=%d,h=10,name=%s", i + 1,
-                                command_center_pos_xz:x(), command_center_pos_xz:y(), island_owner,
-                                island_size, island_size,
-                                island:get_name()
-                        ))
                     end
+                    tacview_out(string.format("b%d:x=%f,y=%f,team=%d,ew=%d,ns=%d,h=5,name=%s", i + 1,
+                            island_pos:x(), island_pos:y(), island_owner,
+                            island_size, island_size,
+                            island:get_name()
+                    ))
+                    g_islands[i] = island
                 end
             end
-        end)
+        end
 
-        for vid, _ in pairs(g_vehicles) do
-            if seen[vid] == nil then
-                tacview_out(string.format("u%d:destroyed=1", vid))
+        if #seen > 0 then
+            for vid, _ in pairs(g_vehicles) do
+                if seen[vid] == nil then
+                    tacview_out(string.format("u%d:destroyed=1", vid))
+                    tacview_log_info(string.format("v=%d destroyed", vid))
+                end
             end
         end
         g_vehicles = seen
