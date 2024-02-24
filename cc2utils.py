@@ -1,7 +1,16 @@
-import logging
-logging.basicConfig()
-logger = logging.getLogger("cc2tacview")
-logger.setLevel(logging.INFO)
+
+class TextLogger:
+    def msg(self, msg: str, **kwargs):
+        print(msg, **kwargs)
+
+    def info(self, msg: str):
+        self.msg(f"INFO {msg}")
+
+    def debug(self, msg: str):
+        self.msg(f"DEBUG: {msg}")
+
+
+logger = TextLogger()
 
 
 def m2deg(m: float) -> float:

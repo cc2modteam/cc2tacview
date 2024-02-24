@@ -72,9 +72,48 @@ typemap = {
     # turrets
     59: CC2Item("TRT",
                 "",
-                tags=[])
+                tags=[]),
+
+    # bombs
+    52: CC2Item("Light Bomb",
+                "",
+                tags=["Light", "Bomb"]),
+    53: CC2Item("Medium Bomb",
+                "",
+                tags=["Medium", "Bomb"]),
+    54: CC2Item("Heavy Bomb",
+                "",
+                tags=["Heavy", "Bomb"]),
+
+    # missiles
+    44: CC2Item("Missile",
+                "",
+                tags=["Missile"]),
+    45: CC2Item("Missile",
+                "",
+                tags=["Missile"]),
+    46: CC2Item("Missile",
+                "",
+                tags=["Missile"]),
+    47: CC2Item("AA Missile",
+                "",
+                tags=["Missile"]),
+    48: CC2Item("Rocket",
+                "",
+                tags=["Missile"]),
+    49: CC2Item("Cruise Missile",
+                "",
+                tags=["Missile"]),
+    66: CC2Item("Torpedo",
+                "",
+                tags=["Torpedo"]),
+
+    71: CC2Item("TV Missile",
+                "",
+                tags=["Missile"]),
 
 }
+
 
 @dataclasses.dataclass
 class Record:
@@ -95,10 +134,12 @@ class Unit:
     docked: bool = True
     event_takeoff: Optional[float] = None
     event_landed: Optional[float] = None
-    ttl: int = 2
+    ttl: int = 10
     destroyed: bool = False
     last_output: Optional[str] = None
     altitude_history: List[Record] = dataclasses.field(default_factory=list)
+
+    printed_destroyed = False
 
     # building/island size
     ew = 0
@@ -115,21 +156,11 @@ class Unit:
         return self.map_kind() == "b"
 
     def is_weapon(self) -> bool:
-        return self.map_kind() == "w"
+        return self.map_kind() == "m"
 
-    def map_id(self) -> int:
-        value = int(self.uid[1:])
-        kind = self.map_kind()
-        if self.is_building() and self.type_name != "JETTY":
-            return (1 + value) << 16
-        elif kind == "x":
-            # explosion
-            return (1 + value) << 32
-        elif kind == "w":
-            # explosion
-            return (1 + value) << 48
-        idnum = 1 + value
-        return idnum
+    def map_id(self) -> str:
+        id_hash = abs(hash(self.uid))
+        return f"{id_hash:x}"
 
     def update(self, data: dict, t: float):
         for prop in ["x", "y", "alt", "hdg", "ns", "ew", "h"]:
@@ -166,8 +197,11 @@ class Unit:
     def definition_index(self) -> int:
         try:
             return int(self.typ)
+        except ValueError:
+            pass
         except TypeError:
-            return -1
+            pass
+        return None
 
     def has_changed(self) -> bool:
         current = self.to_acmi()
@@ -238,7 +272,7 @@ class Unit:
         return props
 
     def is_explosion(self):
-        return False
+        return self.map_kind() == "x"
 
     @property
     def type_name(self) -> str:
@@ -248,6 +282,8 @@ class Unit:
                 mapped = typemap.get(self.definition_index, None)
                 if mapped is not None:
                     return mapped.shortname
+        if self.is_explosion():
+            return "<BOOM>"
         return "?"
 
     def is_unit(self) -> bool:
@@ -304,3 +340,6 @@ class Unit:
         if remember:
             self.last_output = detail
         return detail
+
+    def __str__(self):
+        return f"{self.type_name} {self.uid}"

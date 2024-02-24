@@ -1,6 +1,7 @@
 import subprocess
 import argparse
 import time
+import uuid
 from datetime import datetime
 from pathlib import Path
 from typing import Dict
@@ -91,8 +92,8 @@ def run_cc2(save_file: Path, verbose=False):
 
 def totacview(load_file: Path) -> Path:
     game_time = 0
-    units: Dict[str, Unit] = {}
-    expls: Dict[str, Unit] = {}
+    map_objects: Dict[str, Unit] = {}
+
     print(f"loading {load_file}..")
     lines = 0
     newfile = load_file.parent / (load_file.stem + ".acmi")
@@ -128,32 +129,46 @@ def totacview(load_file: Path) -> Path:
                                 if new_game_time > game_time:
                                     game_time = new_game_time
                                     # print all units so far
-                                    for uid, u in units.items():
+                                    for uid, u in map_objects.items():
                                         if u.last_printed < game_time:
                                             show = False
                                             if u.ttl > 0:
-                                                if u.is_unit():
-                                                    if not u.docked:
+                                                if u.is_building():
+                                                    show = True
+                                                else:
+                                                    u.ttl -= 1
+                                                    if u.is_weapon():
+                                                        show = True
+                                                    elif u.is_explosion():
+                                                        show = True
+                                                    elif not u.docked:
                                                         if u.x is not None:
                                                             show = True
-
-                                                elif u.is_building():
-                                                    show = True
                                             if show:
                                                 with u.reset():
                                                     events = u.get_events()
                                                     if u.has_changed():
                                                         print(u.to_acmi(remember=True), file=outfile)
-                                                    for event in events:
-                                                        print(f"0,Event={event}|{u.map_id()}|", file=outfile)
+                                                    if not u.printed_destroyed:
+                                                        for event in events:
+                                                            print(f"0,Event={event}|{u.map_id()}|", file=outfile)
+                                                        if u.destroyed:
+                                                            u.printed_destroyed = True
                                                 u.last_printed = game_time
 
-                                    for uid in list(units.keys()):
-                                        u = units[uid]
-                                        if u.ttl < 0 or u.destroyed:
-                                            for event in u.get_events():
-                                                print(f"0,Event={event}|{u.map_id()}|", file=outfile)
-                                            del units[uid]
+                                    for uid in list(map_objects.keys()):
+                                        u = map_objects[uid]
+                                        if u.ttl <= 0 or u.destroyed:
+
+                                            if u.destroyed:
+                                                blast = Unit(uid="x" + str(uuid.uuid4()), typ="x", x=u.x, y=u.y, alt=u.alt)
+                                                blast.ttl = 10
+                                                map_objects[blast.uid] = blast
+                                            else:
+                                                # simply went out of range
+                                                print(f"0,Event=LeftArea|{u.map_id()}|", file=outfile)
+
+                                            del map_objects[uid]
                                             print(f"-{u.map_id()}", file=outfile)
 
                                     print(f"#{new_game_time}", file=outfile)
@@ -162,14 +177,14 @@ def totacview(load_file: Path) -> Path:
                             item_id = parts[1]
                             item_def = props.get("def", None)
                             item_team = props.get("team", None)
-                            if item_id not in units:
+                            if item_id not in map_objects:
                                 u = Unit(uid=item_id,
                                          typ=item_def,
                                          team=item_team)
-                                units[item_id] = u
+                                map_objects[item_id] = u
 
                             if props and item_id:
-                                u = units.get(item_id, None)
+                                u = map_objects.get(item_id, None)
                                 if u is not None:
                                     try:
                                         u.update(props, game_time)

@@ -2,6 +2,8 @@ g_is_exit = false
 g_state_counter = 0
 g_vehicle_id = 0
 
+g_attached_unit_class = e_game_object_type.drydock
+
 
 function update(screen_w, screen_h, ticks)
 
@@ -55,6 +57,9 @@ g_tacview_debug = 1
 g_tacview_errors = {}
 g_tacview_skip = false
 g_tacview_drydock = nil
+g_tacview_fps = 4
+g_game_ticks_per_sec = 30
+g_tacview_interval = g_game_ticks_per_sec / g_tacview_fps
 
 function tacview_table_contains(tab, needle)
     for _, v in pairs(tab) do
@@ -132,10 +137,9 @@ function _be_tacview()
     if self:get() then
         local vteam = update_get_screen_team_id()
         local vdef = self:get_definition_index()
-        if vdef ~= e_game_object_type.chassis_carrier then
+        if vdef ~= g_attached_unit_class then
             g_tacview_skip = true
         else
-            -- we are a lifeboat, skip if we are not the last lifeboat
             local vehicle_count = update_get_map_vehicle_count()
             local last_crr = nil
 
@@ -143,7 +147,7 @@ function _be_tacview()
                 local vehicle = update_get_map_vehicle_by_index(i)
                 if vehicle:get() then
                     local vdef = vehicle:get_definition_index()
-                    if vdef == e_game_object_type.chassis_carrier then
+                    if vdef == g_attached_unit_class then
                         if vteam == vehicle:get_team() then
                             -- crr on our team
                             last_crr = vehicle
@@ -165,8 +169,10 @@ end
 
 g_vehicles = {}
 g_islands = {}
+g_missiles = {}
 
 g_tick = 0
+
 
 function _do_tacview(arg)
     _be_tacview()
@@ -179,7 +185,8 @@ function _do_tacview(arg)
         get_drydock()
     end
     g_tick = update_get_logic_tick()
-    local now = g_tick / 30  -- seconds since map started
+
+    local now = g_tick / g_game_ticks_per_sec  -- seconds since map started
 
     if g_last_tacview_tick == 0 then
         print("start tacview adapter .." .. g_tacview_thread )
@@ -189,21 +196,20 @@ function _do_tacview(arg)
         -- return if we aren't the carrier
         local screen_vehicle = update_get_screen_vehicle()
         if screen_vehicle:get() then
-            if screen_vehicle:get_definition_index() ~= e_game_object_type.chassis_carrier then
+            if screen_vehicle:get_definition_index() ~= g_attached_unit_class then
                 g_tacview_skip = true
                 return
             else
-                print(string.format("tacview %s adapter on lifeboat screen", g_tacview_thread))
+                print(string.format("tacview %s adapter on screen", g_tacview_thread))
             end
         end
     end
 
     local since_last = g_tick - g_last_tacview_tick
 
-    if since_last < 15 then
+    if since_last < g_tacview_interval then
         return
     end
-
     g_last_tacview_tick = g_tick
     tacview_out(string.format("t=%f", now))
 
@@ -213,12 +219,13 @@ function _do_tacview(arg)
 
         local parent = v:get_attached_parent_id()
         local docked = parent > 0
-        local found = {
+        local unit = {
             team = v_team,
             def = v_def,
             docked = docked,
             hdg = 0,
             alt = 0,
+            valt = 0,
             x = 0,
             y = 0,
             last_sent = 0,  -- last tick we sent a position
@@ -226,41 +233,43 @@ function _do_tacview(arg)
 
         local fwd = v:get_direction()
         local bearing = ((90 - math.atan(fwd:y(), fwd:x()) / math.pi * 180) + 360) % 360
-        found.hdg = bearing
+        unit.hdg = bearing
 
         local v_xz = v:get_position_xz()
         local alt = get_altitude(vid)
 
-        found.alt = alt
-        found.x = v_xz:x()
-        found.y = v_xz:y()
+        unit.alt = alt
+        unit.x = v_xz:x()
+        unit.y = v_xz:y()
 
         local old = g_vehicles[vid]
 
         -- emit each new unit once
-        if old == nil or old.def ~= found.def or old.team ~= found.team then
+        if old == nil or old.def ~= unit.def or old.team ~= unit.team then
             -- not printed before
             tacview_out(string.format(
                     "%s%s:def=%d,team=%d,docked=%s,x=%f,y=%f,alt=%f,hdg=%f", k, vid,
-                    found.def, found.team, found.docked, found.x, found.y, found.alt, found.hdg))
-            found.last_sent = g_tick
+                    unit.def, unit.team, unit.docked, unit.x, unit.y, unit.alt, unit.hdg))
+            unit.last_sent = g_tick
         else
-            found.last_sent = old.last_sent
+            unit.last_sent = old.last_sent
             -- already seen and output, update things that have changed only
-            if found.docked ~= old.docked then
-                tacview_out(string.format("%s%s:docked=%s", k, vid, found.docked))
+            if unit.docked ~= old.docked then
+                tacview_out(string.format("%s%s:docked=%s", k, vid, unit.docked))
             end
+            local dalt = (old.alt - unit.alt)
+            unit.valt = (old.alt - unit.alt) / g_tacview_interval
 
             -- if position changed by more than 4m, print location or if its been longer than 10 sec since we did
-            local displaced = math.abs(old.x - found.x) + math.abs(g_vehicles[vid].y - found.y + math.abs(g_vehicles[vid].alt - found.alt))
+            local displaced = math.abs(old.x - unit.x) + math.abs(old.y - unit.y + math.abs(dalt))
             if displaced > 4 or g_tick - old.last_sent > 10 then
                 tacview_out(string.format(
                 "%s%s:x=%f,y=%f,alt=%f,hdg=%f", k, vid,
-                        found.x, found.y, found.alt, found.hdg))
-                found.last_sent = g_tick
+                        unit.x, unit.y, unit.alt, unit.hdg))
+                unit.last_sent = g_tick
             end
         end
-        return found
+        return unit
     end
 
     function try_get_visible(v)
@@ -343,9 +352,183 @@ function _do_tacview(arg)
             end
         end
         g_vehicles = seen
+
+        do_missiles()
+
     end)
 
     if ret == false then
         print(string.format("err:%s", err))
+    end
+end
+
+function do_missiles()
+    local missile_count = update_get_missile_count()
+    -- identify missiles by their historic location and give them a random ID number
+    -- track and report missiles
+    for i = 0, missile_count - 1 do
+        local missile = update_get_missile_by_index(i)
+        local found_m = find_missile(missile)
+        if found_m == nil then
+            found_m = add_missile(missile)
+        else
+            found_m = update_missile(missile, found_m)
+        end
+        tacview_out(
+                string.format(
+                "%s%s:def=%d,team=%d,x=%f,y=%f,alt=%f", "m", found_m.id,
+                found_m.def, found_m.team, found_m.x, found_m.y, found_m.alt))
+    end
+    clean_missiles()
+end
+
+function find_missile(missile)
+    -- find the missile in our recent missile history
+    -- split up by missile type to make search faster
+    local mdef = missile:get_definition_index()
+    if g_missiles[mdef] ~= nil then
+
+        local missile_trail_count = missile:get_trail_count()
+        for missile_trail_index = missile_trail_count - 1, 0, -1 do
+            -- trail is in old->new order
+            -- look through this missile's trail and find the first entry with exactly the same x,z location, it
+            -- is pretty unlikely that any other will have -exactly- the same trail history
+            local trail_xz = missile:get_trail_position(missile_trail_index)
+
+            for i, m in pairs(g_missiles[mdef]) do
+                if m.hx == trail_xz:x() and m.hy == trail_xz:y() then
+                    return m
+                end
+            end
+        end
+    end
+    return nil
+end
+
+function update_missile(missile, m)
+    local missile_trail_count = missile:get_trail_count()
+    local pos_xz = missile:get_position_xz()
+    m.x = pos_xz:x()
+    m.y = pos_xz:y()
+
+    if m.lx == nil then
+        m.lx = m.x
+        m.ly = m.y
+        m.lalt = m.alt
+    end
+
+    if missile_trail_count > 0 then
+        local trail_xz = missile:get_trail_position(missile_trail_count - 1)
+        m.hx = trail_xz:x()
+        m.hy = trail_xz:y()
+    else
+        m.hx = m.x
+        m.hy = m.y
+    end
+    m.x = pos_xz:x()
+    m.y = pos_xz:y()
+    m.tick = g_tick
+
+    -- missile speed since launched
+    local dx = m.hx - m.x
+    local dy = m.hy - m.y
+
+    -- estimate the altitude
+    local age = (m.tick - m.launched_tick) / g_game_ticks_per_sec  -- 30fps
+    if m.def == e_game_object_type.bomb_1
+        or m.def == e_game_object_type.bomb_2
+        or m.def == e_game_object_type.bomb_3
+        or m.def == e_game_object_type.torpedo
+        or m.def == e_game_object_type.torpedo_decoy
+        or m.def == e_game_object_type.torpedo_noisemaker
+        or m.def == e_game_object_type.torpedo_sonar_buoy
+        or m.def == e_game_object_type.bomb_fuel_tank
+    then
+
+        -- for bombs and torps, they just fall over time due to gravity (duh) so we can calculate the altitude based on the age
+        -- s = ut + 0.5 * att
+        local s = (m.uvalt * age) + 0.5 * -9.81 * age * age
+        m.alt = m.lalt + s
+    else
+        if m.def == e_game_object_type.missile_cruise then
+            -- make cruise missiles loft a little for the first few sec
+            -- we can't really trace the real missile arc but this looks ok
+            if m.alt < 20 and age < 5 then
+                m.alt = m.alt + 5
+            end
+        end
+
+        local target = missile:get_tracked_vehicle_id()
+        if target == nil then
+           -- no target, use the vertical speed of the launcher
+           -- move vertically by one tick speed
+           m.alt = m.alt + (m.uvalt / g_game_ticks_per_sec)
+        else
+        -- for missiles that are locked onto a target,
+        --
+        --   missile position -------------------
+        --                                      |
+        --                                    target
+        --
+        --   assume a straight line between the position and target, estimate the number of ticks to the target
+        --   based on constant x/z missile speed, then
+        --   directly,
+        end
+    end
+
+    if m.alt < 0 then
+        m.alt = 0
+    end
+    return m
+end
+
+function add_missile(missile)
+    local mdef = missile:get_definition_index()
+    if g_missiles[mdef] == nil then
+        g_missiles[mdef] = {}
+    end
+
+    local m = {
+        id = math.random(1, 99999),
+        def = mdef,
+        team = missile:get_team(),
+        launched_tick = g_tick,
+        launcher = missile:get_fired_vehicle_id(),
+        x = 0,
+        y = 0,
+        hx = 0,
+        hy = 0,
+        alt = 0,
+        -- launch origin
+        lx = nil,
+        ly = nil,
+        lalt = 0,
+        uvalt = 0, -- initial vertical speed
+    }
+
+    if m.launcher ~= nil then
+        m.alt = get_altitude(m.launcher)
+
+        launcher = g_vehicles[m.launcher]
+        if launcher ~= nil then
+            m.uvalt = launcher.valt * 0.92
+        end
+    end
+
+    update_missile(missile, m)
+
+    table.insert(g_missiles[mdef], m)
+    return m
+end
+
+function clean_missiles()
+    -- clear up expired missiles
+    for def, mlist in pairs(g_missiles) do
+        for i, m in pairs(mlist) do
+            if g_tick > m.tick then
+                tacview_out(string.format("m%d:destroyed=1", m.id))
+                table.remove(mlist, i)
+            end
+        end
     end
 end
