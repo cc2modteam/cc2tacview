@@ -134,7 +134,7 @@ class Unit:
     docked: bool = True
     event_takeoff: Optional[float] = None
     event_landed: Optional[float] = None
-    ttl: int = 10
+    expire: float = 0
     destroyed: bool = False
     last_output: Optional[str] = None
     altitude_history: List[Record] = dataclasses.field(default_factory=list)
@@ -163,6 +163,8 @@ class Unit:
         return f"{id_hash:x}"
 
     def update(self, data: dict, t: float):
+        if t > 0.0:
+            self.expire = t + 60
         for prop in ["x", "y", "alt", "hdg", "ns", "ew", "h"]:
             value = data.get(prop, None)
             if value is not None:
@@ -216,7 +218,7 @@ class Unit:
                 events.append("TakenOff")
         if self.destroyed:
             events.append("Destroyed")
-        elif self.ttl < 1:
+        elif self.expire < 1:
             events.append("LeftArea")
         return events
 

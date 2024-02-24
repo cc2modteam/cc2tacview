@@ -132,18 +132,21 @@ def totacview(load_file: Path) -> Path:
                                     for uid, u in map_objects.items():
                                         if u.last_printed < game_time:
                                             show = False
-                                            if u.ttl > 0:
+                                            if u.expire >= game_time:
                                                 if u.is_building():
+                                                    # buildings dont expire
+                                                    u.expire = game_time + 60
                                                     show = True
                                                 else:
-                                                    u.ttl -= 1
                                                     if u.is_weapon():
+                                                        u.expire = game_time + 60
                                                         show = True
                                                     elif u.is_explosion():
                                                         show = True
-                                                    elif not u.docked:
-                                                        if u.x is not None:
-                                                            show = True
+                                                    if not show:
+                                                        if not u.docked:
+                                                            show = u.x is not None
+
                                             if show:
                                                 with u.reset():
                                                     events = u.get_events()
@@ -158,11 +161,10 @@ def totacview(load_file: Path) -> Path:
 
                                     for uid in list(map_objects.keys()):
                                         u = map_objects[uid]
-                                        if u.ttl <= 0 or u.destroyed:
-
+                                        if u.expire < game_time or u.destroyed:
                                             if u.destroyed:
                                                 blast = Unit(uid="x" + str(uuid.uuid4()), typ="x", x=u.x, y=u.y, alt=u.alt)
-                                                blast.ttl = 10
+                                                blast.expire = game_time + 3
                                                 map_objects[blast.uid] = blast
                                             else:
                                                 # simply went out of range
@@ -180,6 +182,7 @@ def totacview(load_file: Path) -> Path:
                             if item_id not in map_objects:
                                 u = Unit(uid=item_id,
                                          typ=item_def,
+                                         expire=game_time + 60,
                                          team=item_team)
                                 map_objects[item_id] = u
 
@@ -188,7 +191,6 @@ def totacview(load_file: Path) -> Path:
                                 if u is not None:
                                     try:
                                         u.update(props, game_time)
-                                        u.ttl = 2
                                     except:
                                         pass
     return newfile
