@@ -190,6 +190,7 @@ function _do_tacview(arg)
 
     if g_last_tacview_tick == 0 then
         print("start tacview adapter .." .. g_tacview_thread )
+        print("tacview=" .. g_tacview_thread)
     end
 
     if g_last_tacview_tick == 0 then

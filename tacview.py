@@ -31,7 +31,7 @@ def get_last_file() -> Path:
     assert False, "no files to convert"
 
 
-def run_cc2(save_file: Path, verbose=False):
+def run_cc2(verbose=False):
     cmdline = [str(CC2), "-dev"]
     logger.info("Starting cc2 ..")
     proc = subprocess.Popen(cmdline,
@@ -42,7 +42,7 @@ def run_cc2(save_file: Path, verbose=False):
                             encoding="utf-8",
                             )
     connected = False
-    logger.info(f"Save tac data as: {save_file} ..")
+
     prev = None
 
     spins = ["/", "-", "\\"]
@@ -57,36 +57,55 @@ def run_cc2(save_file: Path, verbose=False):
         spin_n = (1 + spin_n) % len(spins)
         return spin_n
 
-    with open(save_file, "w") as outfile:
-        while proc.poll() is None:
-            line = proc.stdout.readline()
+    tv_thread = None
+    while proc.poll() is None:
+        save_file = Path.home() / "cc2-log" / f"cc2-rac-raw-{datetime.now().timestamp()}.log"
+        save_file.parent.mkdir(parents=True, exist_ok=True)
+        logger.info(f"Save tac data as: {save_file} ..")
 
-            now = time.monotonic()
-            elapsed = now - last_rate
-            last_rate = now
-            if msg_count > 0 and elapsed > 0:
-                rate = int((msg_count - last_count) / elapsed)
-                prefix = f"{rate} msg/sec"
-                spin_n = spinner(prefix, spin_n)
-            last_count = msg_count
+        with open(save_file, "w") as outfile:
+            while proc.poll() is None:
+                line = proc.stdout.readline()
+                now = time.monotonic()
+                elapsed = now - last_rate
+                last_rate = now
+                if msg_count > 0 and elapsed > 0:
+                    rate = int((msg_count - last_count) / elapsed)
+                    prefix = f"{rate} msg/sec"
+                    spin_n = spinner(prefix, spin_n)
+                last_count = msg_count
 
-            if line == prev:
-                continue
-            if line.startswith("tac:"):
-                msg_count += 1
-                if not connected:
-                    connected = True
-                    logger.info("connected with stdout..")
-                outfile.write(line)
-                prev = line
-                if verbose:
-                    logger.info(line)
+                if line == prev:
+                    continue
+                if line.startswith("tacview="):
+                    logger.info("mod restarted")
+                    _, tid = line.strip().split("=", 1)
+                    if tv_thread is None:
+                        tv_thread = tid
+                    else:
+                        if tid != tv_thread:
+                            # new game ?
+                            continue
 
-            elif line.startswith("log:"):
-                logger.info(line.split(":", 1)[1].strip())
-            else:
-                if line.rstrip():
-                    logger.info(line.rstrip())
+                if line.startswith("tac:"):
+                    msg_count += 1
+                    if not connected:
+                        connected = True
+                        logger.info("connected with stdout..")
+
+                    outfile.write(line)
+                    prev = line
+                    if verbose:
+                        logger.info(line)
+
+                elif line.startswith("log:"):
+                    logger.info(line.split(":", 1)[1].strip())
+                else:
+                    if line.rstrip():
+                        logger.info(line.rstrip())
+
+
+
     logger.info("cc2 has exited.")
 
 
@@ -199,9 +218,7 @@ def totacview(load_file: Path) -> Path:
 def run():
     opts = parser.parse_args()
     if opts.run:
-        savefile = Path.home() / "cc2-log" / f"cc2-rac-raw-{datetime.now().timestamp()}.log"
-        savefile.parent.mkdir(parents=True, exist_ok=True)
-        run_cc2(savefile, verbose=opts.verbose)
+        run_cc2(verbose=opts.verbose)
     elif opts.load:
         filename = opts.load
         if filename.name == "last":
