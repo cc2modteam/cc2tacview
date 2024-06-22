@@ -1,3 +1,8 @@
 <?xml version="1.0" encoding="UTF-8"?>
-<data name="Tacview" author="Bredroll" description="x1">
+<data name="Tacview" author="Bredroll" description="
+Basic Tacview support for Carrier Command 2.
+
+This mod prints data that can be eventually used to generate tacview files.
+
+">
 </data>

@@ -62,7 +62,7 @@ def run_cc2(verbose=False):
         save_file = Path.home() / "cc2-log" / f"cc2-rac-raw-{datetime.now().timestamp()}.log"
         save_file.parent.mkdir(parents=True, exist_ok=True)
         logger.info(f"Save tac data as: {save_file} ..")
-
+        logger.info("waiting for tacview data..")
         with open(save_file, "w") as outfile:
             while proc.poll() is None:
                 line = proc.stdout.readline()

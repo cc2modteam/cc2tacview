@@ -57,7 +57,7 @@ g_tacview_debug = 1
 g_tacview_errors = {}
 g_tacview_skip = false
 g_tacview_drydock = nil
-g_tacview_fps = 4
+g_tacview_fps = 3
 g_game_ticks_per_sec = 30
 g_tacview_interval = g_game_ticks_per_sec / g_tacview_fps
 
