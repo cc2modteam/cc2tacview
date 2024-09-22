@@ -57,7 +57,7 @@ g_tacview_debug = 1
 g_tacview_errors = {}
 g_tacview_skip = false
 g_tacview_drydock = nil
-g_tacview_fps = 3
+g_tacview_fps = 1.5
 g_game_ticks_per_sec = 30
 g_tacview_interval = g_game_ticks_per_sec / g_tacview_fps
 
@@ -106,21 +106,24 @@ end
 
 function get_drydock()
     -- get any drydock
-    local vehicle_count = update_get_map_vehicle_count()
-    for i = 0, vehicle_count - 1, 1 do
-        local vehicle = update_get_map_vehicle_by_index(i)
-        if vehicle:get() then
-            local def = vehicle:get_definition_index()
-            if def == e_game_object_type.drydock then
-                g_tacview_drydock = vehicle:get_id()
-                return
+    if g_tacview_drydock == nil then
+        local vehicle_count = update_get_map_vehicle_count()
+        for i = 0, vehicle_count - 1, 1 do
+            local vehicle = update_get_map_vehicle_by_index(i)
+            if vehicle:get() then
+                local def = vehicle:get_definition_index()
+                if def == e_game_object_type.drydock then
+                    g_tacview_drydock = vehicle:get_id()
+                    return g_tacview_drydock
+                end
             end
         end
     end
+    return g_tacview_drydock
 end
 
 function get_altitude(vid)
-    local vect = update_get_map_vehicle_position_relate_to_parent_vehicle(g_tacview_drydock, vid)
+    local vect = update_get_map_vehicle_position_relate_to_parent_vehicle(get_drydock(), vid)
     return vect:y()
 end
 
@@ -445,35 +448,35 @@ function update_missile(missile, m)
         or m.def == e_game_object_type.torpedo_sonar_buoy
         or m.def == e_game_object_type.bomb_fuel_tank
     then
-
         -- for bombs and torps, they just fall over time due to gravity (duh) so we can calculate the altitude based on the age
         -- s = ut + 0.5 * att
         local s = (m.uvalt * age) + 0.5 * -9.81 * age * age
         m.alt = m.lalt + s
-    else
-        if m.def == e_game_object_type.missile_cruise then
-            -- make cruise missiles loft a little for the first few sec
-            -- we can't really trace the real missile arc but this looks ok
-            if m.alt < 20 and age < 5 then
-                m.alt = m.alt + 5
-            end
+    elseif m.def == e_game_object_type.missile_cruise then
+        -- make cruise missiles loft a little for the first few sec
+        -- we can't really trace the real missile arc but this looks ok
+        if m.alt < 150 and age < 5 then
+            m.alt = m.alt + 5
         end
-
+    else
         local target = missile:get_tracked_vehicle_id()
         if target == nil then
-           -- no target, use the vertical speed of the launcher
-           -- move vertically by one tick speed
-           m.alt = m.alt + (m.uvalt / g_game_ticks_per_sec)
+            -- no target, use the vertical speed of the launcher
+            -- move vertically by one tick speed
+            -- this could be a rocket or un-locked AA/IR
+            m.alt = m.alt + (m.uvalt / g_game_ticks_per_sec)
         else
-        -- for missiles that are locked onto a target,
-        --
-        --   missile position -------------------
-        --                                      |
-        --                                    target
-        --
-        --   assume a straight line between the position and target, estimate the number of ticks to the target
-        --   based on constant x/z missile speed, then
-        --   directly,
+            -- for missiles that are locked onto a target,
+            -- if target is below, descend, etc
+            local target_vehicle = update_get_map_vehicle_by_id(target)
+            if target_vehicle and target_vehicle:get() then
+                local tgt_alt = get_altitude(target)
+                if tgt_alt > m.alt then
+                    m.alt = m.alt + 0.8
+                else
+                    m.alt = m.alt - 0.9
+                end
+            end
         end
     end
 
@@ -515,7 +518,7 @@ function add_missile(missile)
             m.uvalt = launcher.valt * 0.92
         end
     end
-
+    -- debug_update_print_metatable(missile)
     update_missile(missile, m)
 
     table.insert(g_missiles[mdef], m)
@@ -531,5 +534,27 @@ function clean_missiles()
                 table.remove(mlist, i)
             end
         end
+    end
+end
+
+function debug_update_print_metatable(obj, x, y)
+    local meta = getmetatable(obj)
+
+    if meta then
+        local ind = 0
+
+        for k, v in pairs(meta) do
+            print(ind .. " " ..  k .. " (" .. type(v) .. ")")
+            ind = ind + 1
+
+            if type(v) == "table" then
+                for kk, vv in pairs(v) do
+                    print(ind .. " " .. kk .. " (" .. type(vv) .. ")")
+                    ind = ind + 1
+                end
+            end
+        end
+    else
+        print("no metatable")
     end
 end

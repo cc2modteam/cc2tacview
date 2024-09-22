@@ -68,11 +68,12 @@ def run_cc2(verbose=False):
                 line = proc.stdout.readline()
                 now = time.monotonic()
                 elapsed = now - last_rate
-                last_rate = now
-                if msg_count > 0 and elapsed > 0:
-                    rate = int((msg_count - last_count) / elapsed)
-                    prefix = f"{rate} msg/sec"
-                    spin_n = spinner(prefix, spin_n)
+                if elapsed > 2:
+                    last_rate = now
+                    if msg_count > 0 and elapsed > 0:
+                        rate = (msg_count - last_count) / elapsed
+                        prefix = f"{rate:2.1f} msg/sec"
+                        spin_n = spinner(prefix, spin_n)
                 last_count = msg_count
 
                 if line == prev:
